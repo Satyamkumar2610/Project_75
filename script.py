@@ -1,36 +1,18 @@
-[6:05 pm, 30/6/2025] Satyam: import pandas as pd
-import networkx as nx
 import plotly.graph_objects as go
-import pydot  # Required for graphviz_layout
-from typing import Dict, List, Any, Optional
-
-# --- Configuration for Visualization ---
-VIS_CONFIG = {
-    'graph_layout': {'rankdir': 'LR', 'splines': 'true', 'nodesep': '0.6'},
-    'edge_line': {'width': 0.7, 'color': '#888'},
-    'node_marker': {
-        'showscale': True,
-        'colorscale': 'Viridis',
-        'reversescale': True,
-        'size_divisor': 350,  # Adjust to scale node sizes
-        'min_size': 8,
-        'line_width': 2
-    },
-    'figure_layout': {
-        'title_text': '<br><b>Interactive Visualization of Chhattisgarh District Evolution (LGD Standardized)</b>',
-        'title_font_size': 18,
-        'showlegend': Fa…
-[6:06 pm, 30/6/2025] Satyam: import networkx as nx
-import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 import pandas as pd
-import pydot  # pydot is now explicitly imported to check for its existence.
+import numpy as np
+import networkx as nx
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
 def load_and_prepare_data():
-    """
-    Loads the district data, including LGD codes for standardization.
-    The LGD code is the official, unique identifier for each district.
-    """
+    """Load the district data"""
     district_data = [
-        # Data enriched with Local Government Directory (LGD) codes for standardization
         {'lgd_code': 470, 'year': 1998, 'district': 'Bastar', 'area': 14970, 'parent_lgd': None},
         {'lgd_code': 472, 'year': 1998, 'district': 'Bilaspur', 'area': 8270, 'parent_lgd': None},
         {'lgd_code': 474, 'year': 1998, 'district': 'Durg', 'area': 8537, 'parent_lgd': None},
@@ -67,117 +49,255 @@ def load_and_prepare_data():
         {'lgd_code': 733, 'year': 2022, 'district': 'Sarangarh-Bilaigarh', 'area': 1650, 'parent_lgd': [478, 615]},
     ]
     return pd.DataFrame(district_data)
-def create_district_graph(df):
-    """Creates a directed graph from the district DataFrame using LGD codes as node IDs."""
+
+
+def create_3d_network_visualization():
+    """3D network visualization of district relationships"""
+    df = load_and_prepare_data()
+
+    # Create graph
     G = nx.DiGraph()
     for _, row in df.iterrows():
-        G.add_node(row['lgd_code'], year=row['year'], district=row['district'], area=row['area'])
+        G.add_node(row['lgd_code'], **row.to_dict())
+
     for _, row in df.iterrows():
         if row['parent_lgd'] is not None:
-            parents = row['parent_lgd']
-            if not isinstance(parents, list):
-                parents = [parents]
-            for parent_lgd in parents:
-                G.add_edge(int(parent_lgd), row['lgd_code'])
-    return G
-def visualize_graph(G):
-    """Generates and displays an interactive Plotly visualization of the graph."""
-    # --- THIS IS THE CORRECTED SECTION ---
-    # Set Graphviz attributes directly on the graph object for the layout engine.
-    # This is the modern way to pass layout options, replacing the old 'args' parameter.
-    G.graph['graph'] = {'rankdir': 'LR', 'splines': 'true', 'nodesep': '0.6'}
-    try:
-        # The 'args' parameter is removed from this call.
-        pos = nx.nx_pydot.graphviz_layout(G, prog='dot')
-    except (ImportError, FileNotFoundError):
-        print("Warning: Graphviz/pydot not found. Falling back to a standard layout.")
-        print(
-            "For a hierarchical view, please install them (e.g., 'pip install pydot' and install Graphviz separately).")
-        pos = nx.spring_layout(G, iterations=50)
-    edge_x, edge_y = [], []
+            parents = row['parent_lgd'] if isinstance(row['parent_lgd'], list) else [row['parent_lgd']]
+            for parent in parents:
+                G.add_edge(parent, row['lgd_code'])
+
+    # Create 3D layout
+    pos = nx.spring_layout(G, k=3, iterations=50, dim=3)
+
+    # Extract coordinates
+    x_nodes = [pos[node][0] for node in G.nodes()]
+    y_nodes = [pos[node][1] for node in G.nodes()]
+    z_nodes = [pos[node][2] for node in G.nodes()]
+
+    # Create edges
+    x_edges, y_edges, z_edges = [], [], []
     for edge in G.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-    edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.7, color='#888'), hoverinfo='none', mode='lines')
-    node_x, node_y, node_text, node_size = [], [], [], []
+        x_edges.extend([pos[edge[0]][0], pos[edge[1]][0], None])
+        y_edges.extend([pos[edge[0]][1], pos[edge[1]][1], None])
+        z_edges.extend([pos[edge[0]][2], pos[edge[1]][2], None])
+
+    # Create node colors based on year
+    node_colors = []
+    node_text = []
     for node in G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_info = G.nodes[node]
-        node_text.append(f"<b>{node_info['district']} ({node_info['year']})</b><br>"
-                         f"LGD Code: {node}<br>"
-                         f"Area: {node_info['area']:,} sq km")
-        node_size.append(max(8, node_info['area'] / 350))
-    node_trace = go.Scatter(
-        x=node_x, y=node_y, mode='markers', hoverinfo='text', text=node_text,
+        year = G.nodes[node]['year']
+        district = G.nodes[node]['district']
+        area = G.nodes[node]['area']
+
+        if year == 1998:
+            color = 'red'
+        elif year == 2007:
+            color = 'orange'
+        elif year == 2012:
+            color = 'blue'
+        elif year == 2020:
+            color = 'green'
+        else:  # 2022
+            color = 'purple'
+
+        node_colors.append(color)
+        node_text.append(f"{district}<br>LGD: {node}<br>Year: {year}<br>Area: {area} km²")
+
+    # Create 3D plot
+    fig = go.Figure()
+
+    # Add edges
+    fig.add_trace(go.Scatter3d(
+        x=x_edges, y=y_edges, z=z_edges,
+        mode='lines',
+        line=dict(color='gray', width=2),
+        hoverinfo='none',
+        showlegend=False
+    ))
+
+    # Add nodes
+    fig.add_trace(go.Scatter3d(
+        x=x_nodes, y=y_nodes, z=z_nodes,
+        mode='markers+text',
         marker=dict(
-            showscale=True, colorscale='Viridis', reversescale=True, color=[], size=node_size,
-            colorbar=dict(thickness=15, title='Year of Formation', xanchor='left', titleside='right'),
-            line_width=2
-        )
+            size=8,
+            color=node_colors,
+            line=dict(width=2, color='black')
+        ),
+        text=[G.nodes[node]['district'] for node in G.nodes()],
+        textposition="middle center",
+        hovertext=node_text,
+        hoverinfo='text',
+        showlegend=False
+    ))
+
+    fig.update_layout(
+        title="3D Network of District Relationships",
+        scene=dict(
+            xaxis_title="X",
+            yaxis_title="Y",
+            zaxis_title="Z",
+            camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+        ),
+        width=900,
+        height=700
     )
-    node_trace.marker.color = [G.nodes[node]['year'] for node in G.nodes()]
-    fig = go.Figure(data=[edge_trace, node_trace],
-                    layout=go.Layout(
-                        title='<br><b>Interactive Visualization of Chhattisgarh District Evolution (LGD Standardized)</b>',
-                        titlefont_size=18, showlegend=False, hovermode='closest',
-                        margin=dict(b=20, l=5, r=5, t=40),
-                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-                    )
-    fig.show()
-def interactive_lineage_tracer(df, G):
-    """Provides a command-line interface to trace district lineage interactively."""
-    name_to_lgd = {row['district'].lower(): row['lgd_code'] for _, row in df.iterrows()}
-    while True:
-        print("\n--- District Lineage Tracer ---")
-        district_name = input("Enter the name of the district to trace (or 'exit' to quit): ").strip().lower()
-        if district_name == 'exit':
-            break
-        if district_name not in name_to_lgd:
-            print(f"Error: District '{district_name.capitalize()}' not found in the dataset.")
-            continue
-        lgd_code = name_to_lgd[district_name]
-        node_info = G.nodes[lgd_code]
-        print(f"\n--- Lineage for {node_info['district']} ({node_info['year']}) ---")
-        ancestors = list(nx.ancestors(G, lgd_code))
-        if ancestors:
-            print(f"\n[▲] ANCESTORS (Formed From):")
-            for ancestor_lgd in sorted(ancestors, key=lambda x: G.nodes[x]['year']):
-                ancestor_info = G.nodes[ancestor_lgd]
-                print(f"  - {ancestor_info['district']} ({ancestor_info['year']})")
-        else:
-            print("\n[▲] ANCESTORS: This is an original district (no parents in this dataset).")
-        descendants = list(nx.descendants(G, lgd_code))
-        if descendants:
-            print(f"\n[▼] DESCENDANTS (Contributed To):")
-            for descendant_lgd in sorted(descendants, key=lambda x: G.nodes[x]['year']):
-                descendant_info = G.nodes[descendant_lgd]
-                print(f"  - {descendant_info['district']} ({descendant_info['year']})")
-        else:
-            print("\n[▼] DESCENDANTS: This district has not been split further.")
-        print("-" * 35)
-if _name_ == '_main_':
-    district_df = load_and_prepare_data()
-    district_graph = create_district_graph(district_df)
-    while True:
-        print("\n=============================================")
-        print("  Chhattisgarh District Evolution Explorer")
-        print("=============================================")
-        print("1. Show Full Interactive Visualization")
-        print("2. Trace Lineage of a Specific District")
-        print("3. Exit")
-        choice = input("Enter your choice (1, 2, or 3): ").strip()
-        if choice == '1':
-            print("Generating visualization... Please check your browser or plot viewer.")
-            visualize_graph(district_graph)
-        elif choice == '2':
-            interactive_lineage_tracer(district_df, district_graph)
-        elif choice == '3':
-            print("Exiting.")
-            break
-        else:
-            print("Invalid choice. Please enter 1, 2, or 3.")
+
+    return fig
+
+
+def create_timeline_visualization():
+    """Create timeline visualization of district formation"""
+    df = load_and_prepare_data()
+
+    # Count districts by year
+    year_counts = df['year'].value_counts().sort_index()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        x=year_counts.index,
+        y=year_counts.values,
+        text=year_counts.values,
+        textposition='auto',
+        marker_color=['red', 'orange', 'blue', 'green', 'purple']
+    ))
+
+    fig.update_layout(
+        title="District Formation Timeline",
+        xaxis_title="Year",
+        yaxis_title="Number of Districts Created",
+        width=800,
+        height=500
+    )
+
+    return fig
+
+
+def create_area_analysis():
+    """Create area analysis visualization"""
+    df = load_and_prepare_data()
+
+    # Create subplots
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Area Distribution by Year', 'Top 10 Largest Districts',
+                        'Area vs Year Scatter', 'District Area Histogram'),
+        specs=[[{"type": "box"}, {"type": "bar"}],
+               [{"type": "scatter"}, {"type": "histogram"}]]
+    )
+
+    # Box plot of area by year
+    for year in df['year'].unique():
+        year_data = df[df['year'] == year]
+        fig.add_trace(
+            go.Box(y=year_data['area'], name=str(year), showlegend=False),
+            row=1, col=1
+        )
+
+    # Top 10 largest districts
+    top_10 = df.nlargest(10, 'area')
+    fig.add_trace(
+        go.Bar(x=top_10['district'], y=top_10['area'], showlegend=False),
+        row=1, col=2
+    )
+
+    # Scatter plot
+    colors = {'1998': 'red', '2007': 'orange', '2012': 'blue', '2020': 'green', '2022': 'purple'}
+    for year in df['year'].unique():
+        year_data = df[df['year'] == year]
+        fig.add_trace(
+            go.Scatter(x=year_data['year'], y=year_data['area'],
+                       mode='markers', name=str(year),
+                       marker=dict(color=colors[str(year)], size=8),
+                       text=year_data['district'], showlegend=False),
+            row=2, col=1
+        )
+
+    # Histogram
+    fig.add_trace(
+        go.Histogram(x=df['area'], nbinsx=15, showlegend=False),
+        row=2, col=2
+    )
+
+    fig.update_layout(height=800, title_text="District Area Analysis")
+    fig.update_xaxes(title_text="Year", row=1, col=1)
+    fig.update_xaxes(title_text="District", row=1, col=2)
+    fig.update_xaxes(title_text="Year", row=2, col=1)
+    fig.update_xaxes(title_text="Area (km²)", row=2, col=2)
+    fig.update_yaxes(title_text="Area (km²)", row=1, col=1)
+    fig.update_yaxes(title_text="Area (km²)", row=1, col=2)
+    fig.update_yaxes(title_text="Area (km²)", row=2, col=1)
+    fig.update_yaxes(title_text="Count", row=2, col=2)
+
+    return fig
+
+
+def perform_clustering():
+    """Perform K-means clustering on district data"""
+    df = load_and_prepare_data()
+
+    # Prepare features for clustering
+    features = df[['year', 'area']].copy()
+
+    # Standardize features
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
+
+    # Perform K-means clustering
+    kmeans = KMeans(n_clusters=3, random_state=42)
+    clusters = kmeans.fit_predict(features_scaled)
+
+    # Add cluster labels to dataframe
+    df['cluster'] = clusters
+
+    # Create visualization
+    fig = px.scatter(df, x='year', y='area', color='cluster',
+                     hover_data=['district', 'lgd_code'],
+                     title="District Clustering (K-means)",
+                     labels={'cluster': 'Cluster'})
+
+    fig.update_layout(width=800, height=600)
+
+    return fig, df
+
+
+def main():
+    """Main function to create all visualizations"""
+    print("Creating visualizations...")
+
+    # Create 3D network visualization
+    fig_3d = create_3d_network_visualization()
+    fig_3d.show()
+
+    # Create timeline visualization
+    fig_timeline = create_timeline_visualization()
+    fig_timeline.show()
+
+    # Create area analysis
+    fig_area = create_area_analysis()
+    fig_area.show()
+
+    # Perform clustering
+    fig_cluster, df_clustered = perform_clustering()
+    fig_cluster.show()
+
+    # Print some statistics
+    df = load_and_prepare_data()
+    print(f"\nDataset Statistics:")
+    print(f"Total districts: {len(df)}")
+    print(f"Years covered: {df['year'].min()} - {df['year'].max()}")
+    print(f"Total area: {df['area'].sum():.2f} km²")
+    print(f"Average area: {df['area'].mean():.2f} km²")
+    print(f"Largest district: {df.loc[df['area'].idxmax(), 'district']} ({df['area'].max():.2f} km²)")
+    print(f"Smallest district: {df.loc[df['area'].idxmin(), 'district']} ({df['area'].min():.2f} km²)")
+
+    # Print districts by year
+    print(f"\nDistricts by formation year:")
+    for year in sorted(df['year'].unique()):
+        count = len(df[df['year'] == year])
+        print(f"{year}: {count} districts")
+
+
+if __name__ == "__main__":
+    main()
