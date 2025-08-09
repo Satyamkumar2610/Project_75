@@ -1,14 +1,36 @@
+"""
+Chhattisgarh District Evolution Visualizer
+
+This script provides a suite of tools to analyze and visualize the historical
+evolution of administrative districts in the state of Chhattisgarh, India,
+from 1998 to 2022. It uses Local Government Directory (LGD) codes as a standard
+identifier.
+
+This version includes a revamped graph-building logic using "junction nodes"
+to prevent visual overlap of districts with multiple parents.
+"""
+
+import warnings
 import networkx as nx
-import plotly.graph_objects as go
 import pandas as pd
+import plotly.graph_objects as go
+from collections import defaultdict
+from typing import Tuple
 
-try:
-    import pydot
-    PYDOT_AVAILABLE = True
-except ImportError:
-    PYDOT_AVAILABLE = False
+# --- Constants ---
+GRAPHVIZ_LAYOUT_CONFIG = {
+    'rankdir': 'LR',  # Layout direction: Left to Right
+    'splines': 'true',  # Use splines for edges
+    'nodesep': '1.0',  # Separation between nodes in the same rank
+    'ranksep': '1.2'  # Separation between ranks (years)
+}
 
-def load_and_prepare_data():
+
+# --- Data Loading ---
+def load_district_data() -> pd.DataFrame:
+    """
+    Loads the Chhattisgarh district dataset into a pandas DataFrame.
+    """
     district_data = [
         {'lgd_code': 470, 'year': 1998, 'district': 'Bastar', 'area': 14970, 'parent_lgd': None},
         {'lgd_code': 472, 'year': 1998, 'district': 'Bilaspur', 'area': 8270, 'parent_lgd': None},
@@ -25,7 +47,7 @@ def load_and_prepare_data():
         {'lgd_code': 471, 'year': 1998, 'district': 'Dhamtari', 'area': 4084, 'parent_lgd': 480},
         {'lgd_code': 469, 'year': 1998, 'district': 'Mahasamund', 'area': 4790, 'parent_lgd': 480},
         {'lgd_code': 468, 'year': 1998, 'district': 'Koriya', 'area': 5977, 'parent_lgd': 482},
-        {'lgd_code': 467, 'year': 1998, 'district': 'Kabirdham', 'area': 4447.05, 'parent_lgd': 472},
+        {'lgd_code': 467, 'year': 1998, 'district': 'Kabirdham', 'area': 4447.05, 'parent_lgd': [481, 472]},
         {'lgd_code': 601, 'year': 2007, 'district': 'Bijapur', 'area': 6562.48, 'parent_lgd': 473},
         {'lgd_code': 602, 'year': 2007, 'district': 'Narayanpur', 'area': 7010, 'parent_lgd': 470},
         {'lgd_code': 613, 'year': 2012, 'district': 'Balod', 'area': 3527, 'parent_lgd': 474},
@@ -38,7 +60,8 @@ def load_and_prepare_data():
         {'lgd_code': 612, 'year': 2012, 'district': 'Balrampur-Ramanujganj', 'area': 6016, 'parent_lgd': 482},
         {'lgd_code': 620, 'year': 2012, 'district': 'Surajpur', 'area': 2786.76, 'parent_lgd': 482},
         {'lgd_code': 727, 'year': 2020, 'district': 'Gaurela-Pendra-Marwahi', 'area': 2307.39, 'parent_lgd': 472},
-        {'lgd_code': 732, 'year': 2022, 'district': 'Khairagarh-Chhuikhadan-Gandai', 'area': 1553.84, 'parent_lgd': 481},
+        {'lgd_code': 732, 'year': 2022, 'district': 'Khairagarh-Chhuikhadan-Gandai', 'area': 1553.84,
+         'parent_lgd': 481},
         {'lgd_code': 731, 'year': 2022, 'district': 'Manendragarh-Chirmiri-Bharatpur', 'area': 4226, 'parent_lgd': 468},
         {'lgd_code': 730, 'year': 2022, 'district': 'Mohla-Manpur-Ambagarh Chowki', 'area': 2145.29, 'parent_lgd': 481},
         {'lgd_code': 734, 'year': 2022, 'district': 'Sakti', 'area': 1600, 'parent_lgd': 475},
@@ -46,216 +69,256 @@ def load_and_prepare_data():
     ]
     return pd.DataFrame(district_data)
 
-def create_district_graph(df):
-    G = nx.DiGraph()
-    for _, row in df.iterrows():
-        G.add_node(row['lgd_code'], year=row['year'], district=row['district'], area=row['area'])
-    for _, row in df.iterrows():
-        if row['parent_lgd'] is not None:
-            parents = row['parent_lgd']
-            if not isinstance(parents, list):
-                parents = [parents]
-            for parent_lgd in parents:
-                G.add_edge(int(parent_lgd), row['lgd_code'])
-    return G
 
-def visualize_graph(G):
-    G.graph['graph'] = {'rankdir': 'LR', 'splines': 'true', 'nodesep': '0.6'}
-    try:
-        try:
-            pos = nx.nx_agraph.graphviz_layout(G, prog='dot')
-        except (ImportError, AttributeError):
-            if PYDOT_AVAILABLE:
-                pos = nx.nx_pydot.graphviz_layout(G, prog='dot')
+# --- Graph Creation (Revamped) ---
+def create_district_graphs(df: pd.DataFrame) -> Tuple[nx.DiGraph, nx.DiGraph]:
+    """
+    Builds two graph representations of the district data.
+    Includes a revamped visual graph logic with junction nodes.
+    """
+    df_dict = df.set_index('lgd_code').to_dict('index')
+    G_data = nx.DiGraph()
+    G_visual = nx.DiGraph()
+
+    # --- Stage 1: Create G_data (simple model for stats) and add all nodes to G_visual ---
+    for lgd_code, data in df_dict.items():
+        G_visual.add_node(lgd_code, **data)
+        G_data.add_node(lgd_code, **data)
+        if data['parent_lgd'] is not None:
+            parents = data['parent_lgd'] if isinstance(data['parent_lgd'], list) else [data['parent_lgd']]
+            for p_code in parents:
+                G_data.add_edge(int(p_code), lgd_code)
+
+    # --- Stage 2: Create edges for G_visual using the junction node strategy ---
+    for lgd_code, data in df_dict.items():
+        if data['parent_lgd'] is not None:
+            parents = data['parent_lgd'] if isinstance(data['parent_lgd'], list) else [data['parent_lgd']]
+
+            if len(parents) > 1:
+                # REVAMP: For multi-parent districts, create an invisible junction node.
+                junction_id = f"junction_{lgd_code}"
+                G_visual.add_node(junction_id, year=data['year'], is_junction=True)
+                for p_code in parents:
+                    G_visual.add_edge(int(p_code), junction_id)
+                G_visual.add_edge(junction_id, lgd_code)
             else:
-                raise ImportError
+                # For single-parent districts, create a direct edge.
+                G_visual.add_edge(int(parents[0]), lgd_code)
+
+    # --- Stage 3: Add "remnant" nodes for chronological flow ---
+    parents_with_children = defaultdict(lambda: defaultdict(list))
+    for child_code, data in df_dict.items():
+        if data['parent_lgd'] is not None:
+            parents = data['parent_lgd'] if isinstance(data['parent_lgd'], list) else [data['parent_lgd']]
+            for p_code in parents:
+                parents_with_children[p_code][data['year']].append(child_code)
+
+    for p_code, splits_by_year in parents_with_children.items():
+        last_timeline_node = p_code
+        for year in sorted(splits_by_year.keys()):
+            # Find the node to connect from. This handles the junction case.
+            source_node = p_code
+            remnant_id = f"remnant_{p_code}_{year}"
+            G_visual.add_node(remnant_id, year=year, district=df_dict[p_code]['district'], is_remnant=True)
+            G_visual.add_edge(last_timeline_node, remnant_id)
+            last_timeline_node = remnant_id
+
+    return G_data, G_visual
+
+
+# --- Visualization (Updated) ---
+def visualize_graph(G: nx.DiGraph) -> None:
+    """
+    Generates and displays an interactive Plotly graph of district evolution.
+    Now handles three node types: districts, remnants, and invisible junctions.
+    """
+    G.graph['graph'] = GRAPHVIZ_LAYOUT_CONFIG
+
+    try:
+        pos = nx.nx_agraph.graphviz_layout(G, prog='dot')
     except (ImportError, FileNotFoundError):
-        print("Warning: Graphviz/pydot not found. Using spring layout.")
-        pos = nx.spring_layout(G, iterations=50)
+        warnings.warn("pygraphviz not found. Using a less structured spring layout.")
+        pos = nx.spring_layout(G, iterations=50, k=0.5)
 
-    edge_x, edge_y = [], []
-    for edge in G.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
+    edge_trace = go.Scatter(
+        x=[x for edge in G.edges() for x in (pos[edge[0]][0], pos[edge[1]][0], None)],
+        y=[y for edge in G.edges() for y in (pos[edge[0]][1], pos[edge[1]][1], None)],
+        line=dict(width=0.7, color='#777'),
+        hoverinfo='none',
+        mode='lines'
+    )
 
-    edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.7, color='#888'), hoverinfo='none', mode='lines')
-
-    node_x, node_y, node_text, node_size = [], [], [], []
-    for node in G.nodes():
+    node_x, node_y, node_text, node_size, node_color, node_border_color = [], [], [], [], [], []
+    for node, data in G.nodes(data=True):
         x, y = pos[node]
         node_x.append(x)
         node_y.append(y)
-        node_info = G.nodes[node]
-        node_text.append(f"<b>{node_info['district']} ({node_info['year']})</b><br>LGD Code: {node}<br>Area: {node_info['area']:,} sq km")
-        node_size.append(max(8, node_info['area'] / 350))
+        node_color.append(data.get('year', 1998))
+
+        # REVAMP: Handle three types of nodes for visualization
+        if data.get('is_junction', False):
+            # Make junction nodes invisible
+            node_text.append("")
+            node_size.append(0)
+            node_border_color.append('rgba(0,0,0,0)')
+        elif data.get('is_remnant', False):
+            # Style for remnant nodes (visual timeline connectors)
+            node_text.append(f"<b>{data.get('district', '')} (Post-{data.get('year', '')})</b><br>Continuation")
+            node_size.append(15)
+            node_border_color.append('lightgrey')
+        else:
+            # Style for actual district nodes
+            lgd_code_str = f"LGD: {data.get('lgd_code', 'N/A')}"
+            area_val = data.get('area', 0)
+            area_str = f"Area: {area_val:,.0f} sq km" if area_val > 0 else "Area: N/A"
+            node_text.append(
+                f"<b>{data.get('district', 'Unknown')} ({data.get('year', '')})</b><br>{lgd_code_str}<br>{area_str}")
+            node_size.append(max(12, area_val / 350))
+            node_border_color.append('black')
 
     node_trace = go.Scatter(
         x=node_x, y=node_y, mode='markers', hoverinfo='text', text=node_text,
         marker=dict(
-            showscale=True,
-            colorscale='Viridis',
-            reversescale=True,
-            color=[G.nodes[node]['year'] for node in G.nodes()],
+            showscale=True, colorscale='Viridis', reversescale=True, color=node_color,
             size=node_size,
-            colorbar=dict(thickness=15, title='Year of Formation', xanchor='left'),
-            line_width=2
+            colorbar=dict(thickness=15, title='Year of Formation'),
+            line=dict(width=2.5, color=node_border_color)
         )
     )
 
-    fig = go.Figure(data=[edge_trace, node_trace],
+    fig = go.Figure(
+        data=[edge_trace, node_trace],
         layout=go.Layout(
-            title=dict(text='<b>Interactive Visualization of Chhattisgarh District Evolution (LGD Standardized)</b>', font=dict(size=18), x=0.5, xanchor='center'),
-            showlegend=False, hovermode='closest',
-            margin=dict(b=20, l=5, r=5, t=60),
-            annotations=[
-                dict(text="Node size represents area. Color represents year of formation.", showarrow=False,
-                     xref="paper", yref="paper", x=0.005, y=-0.002, xanchor='left', yanchor='bottom', font=dict(size=12, color='#666'))
-            ],
+            title=dict(text='<b>Evolution of Districts in Chhattisgarh (1998-2022)</b>', font_size=20, x=0.5),
+            showlegend=False, hovermode='closest', plot_bgcolor='white',
+            margin=dict(b=20, l=5, r=5, t=50),
+            annotations=[dict(
+                text="Node size corresponds to area. Color indicates formation year. Grey borders show a district's continuation after a split.",
+                showarrow=False, xref="paper", yref="paper", x=0.5, y=-0.02
+            )],
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            plot_bgcolor='white', paper_bgcolor='white'
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
         )
     )
     fig.show()
 
-def interactive_lineage_tracer(df, G):
+
+# --- Command-Line Tools (Unchanged)---
+def trace_district_lineage(df: pd.DataFrame, G: nx.DiGraph) -> None:
+    """
+    Provides a command-line interface to trace the lineage of a district.
+    """
     name_to_lgd = {row['district'].lower(): row['lgd_code'] for _, row in df.iterrows()}
+    districts = sorted(df['district'].unique())
+
     while True:
-        print("\n" + "="*50)
-        print("     District Lineage Tracer")
-        print("="*50)
-        print("\nAvailable districts:")
-        districts = sorted([row['district'] for _, row in df.iterrows()])
+        print("\n" + "=" * 50 + "\n     District Lineage Tracer\n" + "=" * 50)
         for i, district in enumerate(districts, 1):
             print(f"{i:2d}. {district}")
         print("\nEnter district name or number (or 'exit' to quit):")
+
         user_input = input("> ").strip()
         if user_input.lower() == 'exit':
             break
-        if user_input.isdigit():
-            idx = int(user_input) - 1
-            if 0 <= idx < len(districts):
-                district_name = districts[idx].lower()
-            else:
-                print(f"Error: Number must be between 1 and {len(districts)}")
-                continue
-        else:
-            district_name = user_input.lower()
-        if district_name not in name_to_lgd:
-            print(f"Error: District '{user_input}' not found in the dataset.")
-            continue
-        lgd_code = name_to_lgd[district_name]
-        node_info = G.nodes[lgd_code]
-        print(f"\n{'='*60}")
-        print(f"  LINEAGE FOR {node_info['district'].upper()} ({node_info['year']})")
-        print(f"{'='*60}")
-        print(f"LGD Code: {lgd_code}")
-        print(f"Area: {node_info['area']:,} sq km")
-        ancestors = list(nx.ancestors(G, lgd_code))
-        if ancestors:
-            print(f"\n🔼 ANCESTORS (Formed From):")
-            for ancestor_lgd in sorted(ancestors, key=lambda x: G.nodes[x]['year']):
-                ancestor_info = G.nodes[ancestor_lgd]
-                print(f"   • {ancestor_info['district']} ({ancestor_info['year']}) - {ancestor_info['area']:,} sq km")
-        else:
-            print("\n🔼 ANCESTORS: This is an original district (no parents in this dataset).")
-        descendants = list(nx.descendants(G, lgd_code))
-        if descendants:
-            print(f"\n🔽 DESCENDANTS (Contributed To):")
-            for descendant_lgd in sorted(descendants, key=lambda x: G.nodes[x]['year']):
-                descendant_info = G.nodes[descendant_lgd]
-                print(f"   • {descendant_info['district']} ({descendant_info['year']}) - {descendant_info['area']:,} sq km")
-        else:
-            print("\n🔽 DESCENDANTS: This district has not been split further.")
-        direct_parents = list(G.predecessors(lgd_code))
-        direct_children = list(G.successors(lgd_code))
-        if direct_parents:
-            print(f"\n↗️  DIRECT PARENTS:")
-            for parent_lgd in direct_parents:
-                parent_info = G.nodes[parent_lgd]
-                print(f"   • {parent_info['district']} ({parent_info['year']})")
-        if direct_children:
-            print(f"\n↘️  DIRECT CHILDREN:")
-            for child_lgd in direct_children:
-                child_info = G.nodes[child_lgd]
-                print(f"   • {child_info['district']} ({child_info['year']})")
-        print("="*60)
 
-def show_statistics(df, G):
-    print("\n" + "="*60)
-    print("   📊 CHHATTISGARH DISTRICT STATISTICS")
-    print("="*60)
+        try:
+            district_name = ""
+            if user_input.isdigit() and 0 < int(user_input) <= len(districts):
+                district_name = districts[int(user_input) - 1].lower()
+            elif user_input.lower() in name_to_lgd:
+                district_name = user_input.lower()
+            else:
+                print("Error: Input not found. Please enter a valid name or number.")
+                continue
+
+            lgd_code = name_to_lgd[district_name]
+            node_info = G.nodes[lgd_code]
+
+            print(f"\n{'=' * 60}\n  Lineage for {node_info['district'].upper()} ({node_info['year']})\n{'=' * 60}")
+            print(f"LGD Code: {lgd_code} | Area at Formation: {node_info['area']:,} sq km")
+
+            direct_parents = list(G.predecessors(lgd_code))
+            if direct_parents:
+                print("\nDirect Parent(s):")
+                for p_lgd in direct_parents:
+                    print(f"   • {G.nodes[p_lgd]['district']} ({G.nodes[p_lgd]['year']})")
+            else:
+                print("\nDirect Parent(s): None (Original District)")
+
+            descendants = list(nx.descendants(G, lgd_code))
+            if descendants:
+                print("\nDescendants (Districts Formed From This One):")
+                for d_lgd in sorted(descendants, key=lambda x: G.nodes[x]['year']):
+                    print(f"   • {G.nodes[d_lgd]['district']} ({G.nodes[d_lgd]['year']})")
+
+            print("=" * 60)
+        except (ValueError, KeyError) as e:
+            print(f"An unexpected error occurred: {e}")
+
+
+def show_statistics(df: pd.DataFrame, G: nx.DiGraph) -> None:
+    """
+    Displays overall statistics about the district data.
+    """
+    print("\n" + "=" * 60 + "\n   Overall District Statistics\n" + "=" * 60)
+
     total_districts = len(df)
     original_districts = len(df[df['parent_lgd'].isna()])
-    derived_districts = total_districts - original_districts
-    print(f"Total Districts: {total_districts}")
-    print(f"Original Districts (1998): {original_districts}")
-    print(f"Derived Districts: {derived_districts}")
-    total_area = df['area'].sum()
-    avg_area = df['area'].mean()
-    largest_district = df.loc[df['area'].idxmax()]
-    smallest_district = df.loc[df['area'].idxmin()]
-    print(f"\nArea Statistics:")
-    print(f"Total Area: {total_area:,.2f} sq km")
-    print(f"Average Area: {avg_area:,.2f} sq km")
-    print(f"Largest District: {largest_district['district']} ({largest_district['area']:,} sq km)")
-    print(f"Smallest District: {smallest_district['district']} ({smallest_district['area']:,} sq km)")
-    years = df['year'].unique()
-    print(f"\nFormation Years: {sorted(years)}")
-    for year in sorted(years):
-        count = len(df[df['year'] == year])
-        districts_that_year = df[df['year'] == year]['district'].tolist()
-        print(f"  {year}: {count} districts - {', '.join(districts_that_year)}")
-    split_counts = {}
-    for _, row in df.iterrows():
-        if row['parent_lgd'] is not None:
-            parents = row['parent_lgd']
-            if not isinstance(parents, list):
-                parents = [parents]
-            for parent_lgd in parents:
-                if parent_lgd not in split_counts:
-                    split_counts[parent_lgd] = 0
-                split_counts[parent_lgd] += 1
-    if split_counts:
-        print(f"\nMost Split Districts:")
-        for lgd_code, count in sorted(split_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
-            district_name = df[df['lgd_code'] == lgd_code]['district'].iloc[0]
-            print(f"  {district_name}: {count} child districts")
-    print("="*60)
 
-def main():
-    district_df = load_and_prepare_data()
-    district_graph = create_district_graph(district_df)
+    print(f"Total Districts Recorded: {total_districts}")
+    print(f"Original Districts (pre-2000): {original_districts}")
+    print(f"New Districts Created Since 1998: {total_districts - original_districts}")
+
+    current_districts_area = sum(data['area'] for node, data in G.nodes(data=True) if not G.out_degree(node))
+    print(f"\nCombined Area of Current Districts: {current_districts_area:,.2f} sq km")
+
+    largest = df.loc[df['area'].idxmax()]
+    smallest = df.loc[df['area'].idxmin()]
+    print(f"Largest District (at formation): {largest['district']} ({largest['area']:,} sq km)")
+    print(f"Smallest District (at formation): {smallest['district']} ({smallest['area']:,} sq km)")
+
+    print("\nDistrict Formations by Year:")
+    for year, count in df['year'].value_counts().sort_index().items():
+        print(f"  {year}: {count} new district(s)")
+
+    print("\nMost Prolific Parent Districts:")
+    split_counts = {node: G.out_degree(node) for node in G.nodes() if G.out_degree(node) > 0}
+    sorted_splits = sorted(split_counts.items(), key=lambda item: item[1], reverse=True)
+    for lgd_code, count in sorted_splits[:5]:
+        print(f"  {G.nodes[lgd_code]['district']}: {count} child district(s)")
+
+    print("=" * 60)
+
+
+# --- Main Application Runner ---
+def main() -> None:
+    """Main function to run the explorer application."""
+    district_df = load_district_data()
+    # Note: We now pass the simpler G_data to the lineage tracer, as it contains the true parentage.
+    data_graph, visual_graph = create_district_graphs(district_df)
+
     while True:
-        print("\n" + "="*55)
-        print("   🏛️  CHHATTISGARH DISTRICT EVOLUTION EXPLORER")
-        print("="*55)
-        print("1. 📊 Show Full Interactive Visualization")
-        print("2. 🔍 Trace Lineage of a Specific District")
-        print("3. 📈 Show District Statistics")
-        print("4. 🚪 Exit")
-        print("="*55)
+        print("\n" + "=" * 55 + "\n   Chhattisgarh District Evolution Explorer\n" + "=" * 55)
+        print("1. Show Full Interactive Visualization")
+        print("2. Trace Lineage of a Specific District")
+        print("3. Show Overall Statistics")
+        print("4. Exit")
+        print("=" * 55)
         choice = input("Enter your choice (1-4): ").strip()
+
         if choice == '1':
-            print("\n🎨 Generating visualization... Please check your browser or plot viewer.")
-            visualize_graph(district_graph)
+            print("\nGenerating visualization...")
+            visualize_graph(visual_graph)
         elif choice == '2':
-            interactive_lineage_tracer(district_df, district_graph)
+            trace_district_lineage(district_df, data_graph)
         elif choice == '3':
-            show_statistics(district_df, district_graph)
+            show_statistics(district_df, data_graph)
         elif choice == '4':
-            print("\n👋 Thank you for using the Chhattisgarh District Evolution Explorer!")
+            print("\nExiting program.")
             break
         else:
-            print("❌ Invalid choice. Please enter 1, 2, 3, or 4.")
+            print("Error: Invalid choice. Please enter a number from 1 to 4.")
+
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
