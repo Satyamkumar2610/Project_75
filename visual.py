@@ -410,7 +410,7 @@ def main():
 if __name__ == "__main__":
     fig1, fig2, fig3, fig4 = main()
 
-    
+    # Optional: Save figures as HTML
     fig1.write_html("area_over_time.html")
     fig2.write_html("percentage_change.html")
     fig3.write_html("rolling_window.html")

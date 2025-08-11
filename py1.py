@@ -1,4 +1,3 @@
-
 import warnings
 import networkx as nx
 import pandas as pd
@@ -8,10 +7,6 @@ from collections import defaultdict
 from typing import Tuple
 
 GRAPHVIZ_LAYOUT_CONFIG = {
-    'rankdir': 'LR',
-    'splines': 'true',
-    'nodesep': '1.5',
-    'ranksep': '1.2'
 }
 
 def load_district_data() -> pd.DataFrame:
@@ -186,7 +181,6 @@ def visualize_area_evolution(df: pd.DataFrame, G: nx.DiGraph) -> None:
     fig = px.area(plot_data, x='Year', y='Area', color='District',
                   title=f"Area Evolution of the '{progenitor_name}' Territory",
                   labels={'Area': 'Area (sq km)'})
-    fig.update_layout(xaxis_type='category')
     fig.show()
 
 def visualize_split_heatmap(df: pd.DataFrame) -> None:
@@ -305,7 +299,6 @@ def main() -> None:
             visualize_area_evolution(district_df, data_graph)
         elif choice == '3':
             print("\nGenerating district split heatmap...")
-            visualize_split_heatmap(district_df.copy())
         elif choice == '4':
             trace_district_lineage(district_df, data_graph)
         elif choice == '5':
