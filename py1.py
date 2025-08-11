@@ -1,19 +1,3 @@
-"""
-Chhattisgarh District Evolution Visualizer
-
-This script provides a suite of tools to analyze and visualize the historical
-evolution of administrative districts in the state of Chhattisgarh, India,
-from 1998 to 2022. It uses Local Government Directory (LGD) codes as a standard
-identifier.
-
-This version includes:
-1. An interactive, chronological graph of district formation.
-2. A lineage tracer for specific districts.
-3. Overall statistics.
-4. A stacked area chart to visualize the evolution of district areas over time.
-5. A heatmap showing the frequency and timing of district splits.
-"""
-
 import warnings
 import networkx as nx
 import pandas as pd
@@ -22,20 +6,10 @@ import plotly.express as px
 from collections import defaultdict
 from typing import Tuple
 
-# --- Constants ---
 GRAPHVIZ_LAYOUT_CONFIG = {
-    'rankdir': 'LR',  # Layout direction: Left to Right
-    'splines': 'true',  # Use splines for edges
-    'nodesep': '1.5',  # Separation between nodes in the same rank
-    'ranksep': '1.2'  # Separation between ranks (years)
 }
 
-
-# --- Data Loading ---
 def load_district_data() -> pd.DataFrame:
-    """
-    Loads the Chhattisgarh district dataset into a pandas DataFrame.
-    """
     district_data = [
         {'lgd_code': 470, 'year': 1998, 'district': 'Bastar', 'area': 14970, 'parent_lgd': None},
         {'lgd_code': 472, 'year': 1998, 'district': 'Bilaspur', 'area': 8270, 'parent_lgd': None},
@@ -74,18 +48,11 @@ def load_district_data() -> pd.DataFrame:
     ]
     return pd.DataFrame(district_data)
 
-
-# --- Graph Creation ---
 def create_district_graphs(df: pd.DataFrame) -> Tuple[nx.DiGraph, nx.DiGraph]:
-    """
-    Builds two graph representations of the district data.
-    Includes a revamped visual graph logic with junction nodes.
-    """
     df_dict = df.set_index('lgd_code').to_dict('index')
     G_data = nx.DiGraph()
     G_visual = nx.DiGraph()
 
-    # Stage 1: Create G_data and add all primary nodes to G_visual
     for lgd_code, data in df_dict.items():
         G_visual.add_node(lgd_code, **data)
         G_data.add_node(lgd_code, **data)
@@ -94,7 +61,6 @@ def create_district_graphs(df: pd.DataFrame) -> Tuple[nx.DiGraph, nx.DiGraph]:
             for p_code in parents:
                 G_data.add_edge(int(p_code), lgd_code)
 
-    # Stage 2: Create visual edges, using junction nodes for multi-parent districts
     for lgd_code, data in df_dict.items():
         if data['parent_lgd'] is not None:
             parents = data['parent_lgd'] if isinstance(data['parent_lgd'], list) else [data['parent_lgd']]
@@ -107,7 +73,6 @@ def create_district_graphs(df: pd.DataFrame) -> Tuple[nx.DiGraph, nx.DiGraph]:
             else:
                 G_visual.add_edge(int(parents[0]), lgd_code)
 
-    # Stage 3: Add "remnant" nodes for chronological flow
     parents_with_children = defaultdict(lambda: defaultdict(list))
     for child_code, data in df_dict.items():
         if data['parent_lgd'] is not None:
@@ -125,12 +90,7 @@ def create_district_graphs(df: pd.DataFrame) -> Tuple[nx.DiGraph, nx.DiGraph]:
 
     return G_data, G_visual
 
-
-# --- Visualization Functions ---
 def visualize_graph(G: nx.DiGraph) -> None:
-    """
-    Generates and displays an interactive Plotly graph of district evolution.
-    """
     G.graph['graph'] = GRAPHVIZ_LAYOUT_CONFIG
     try:
         pos = nx.nx_agraph.graphviz_layout(G, prog='dot')
@@ -180,16 +140,10 @@ def visualize_graph(G: nx.DiGraph) -> None:
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
     fig.show()
 
-
 def visualize_area_evolution(df: pd.DataFrame, G: nx.DiGraph) -> None:
-    """
-    NEW: Creates an interactive stacked area chart to show how an original
-    district's territory was partitioned over time.
-    """
     original_districts = df[df['parent_lgd'].isna()].sort_values('district')
     print("\n" + "=" * 50 + "\n   District Area Evolution Visualizer\n" + "=" * 50)
     print("Select an original district to see its area evolution:")
-    # Use index from the original dataframe for stable selection
     for i, (idx, row) in enumerate(original_districts.iterrows()):
         print(f"  {i + 1}. {row['district']}")
 
@@ -207,9 +161,7 @@ def visualize_area_evolution(df: pd.DataFrame, G: nx.DiGraph) -> None:
     family_codes = {progenitor_code} | nx.descendants(G, progenitor_code)
     family_df = df[df['lgd_code'].isin(family_codes)].set_index('lgd_code')
 
-    # Calculate area changes over time
     years = sorted(df['year'].unique())
-    # FIX: Address FutureWarning by calling infer_objects after fillna
     area_over_time = pd.DataFrame(index=family_df.index, columns=years).fillna(0).infer_objects(copy=False)
 
     for dist_code, row in family_df.iterrows():
@@ -218,29 +170,20 @@ def visualize_area_evolution(df: pd.DataFrame, G: nx.DiGraph) -> None:
             if year >= row['year']:
                 children_formed_by_year = {c for c in G.successors(dist_code) if
                                            c in family_df.index and family_df.loc[c]['year'] <= year}
-                # FIX: Convert set to list for pandas indexing to resolve TypeError
                 area_of_children = family_df.loc[list(children_formed_by_year)][
                     'area'].sum() if children_formed_by_year else 0
                 area_over_time.loc[dist_code, year] = current_area - area_of_children
 
-    # Prepare data for plotting
     plot_data = area_over_time.T.reset_index().melt(id_vars='index', var_name='lgd_code', value_name='Area')
     plot_data.rename(columns={'index': 'Year'}, inplace=True)
     plot_data['District'] = plot_data['lgd_code'].map(family_df['district'])
 
-    # Create the stacked area chart
     fig = px.area(plot_data, x='Year', y='Area', color='District',
                   title=f"Area Evolution of the '{progenitor_name}' Territory",
                   labels={'Area': 'Area (sq km)'})
-    fig.update_layout(xaxis_type='category')  # Treat years as distinct categories
     fig.show()
 
-
 def visualize_split_heatmap(df: pd.DataFrame) -> None:
-    """
-    NEW: Generates a heatmap to show the number of new districts created
-    from parent districts in specific years.
-    """
     lgd_to_name = df.set_index('lgd_code')['district'].to_dict()
     df['parent_list'] = df['parent_lgd'].apply(lambda x: x if isinstance(x, list) else ([x] if pd.notna(x) else []))
 
@@ -260,12 +203,7 @@ def visualize_split_heatmap(df: pd.DataFrame) -> None:
                       yaxis_title='Parent District', xaxis_type='category')
     fig.show()
 
-
-# --- Command-Line Tools ---
 def trace_district_lineage(df: pd.DataFrame, G: nx.DiGraph) -> None:
-    """
-    Provides a command-line interface to trace the lineage of a district.
-    """
     name_to_lgd = {row['district'].lower(): row['lgd_code'] for _, row in df.iterrows()}
     districts = sorted(df['district'].unique())
 
@@ -313,11 +251,7 @@ def trace_district_lineage(df: pd.DataFrame, G: nx.DiGraph) -> None:
         except (ValueError, KeyError) as e:
             print(f"An unexpected error occurred: {e}")
 
-
 def show_statistics(df: pd.DataFrame, G: nx.DiGraph) -> None:
-    """
-    Displays overall statistics about the district data.
-    """
     print("\n" + "=" * 60 + "\n   Overall District Statistics\n" + "=" * 60)
     total_districts = len(df);
     original_districts = len(df[df['parent_lgd'].isna()])
@@ -340,10 +274,7 @@ def show_statistics(df: pd.DataFrame, G: nx.DiGraph) -> None:
         print(f"  {G.nodes[lgd_code]['district']}: {count} child district(s)")
     print("=" * 60)
 
-
-# --- Main Application Runner ---
 def main() -> None:
-    """Main function to run the explorer application."""
     district_df = load_district_data()
     data_graph, visual_graph = create_district_graphs(district_df)
 
@@ -368,7 +299,6 @@ def main() -> None:
             visualize_area_evolution(district_df, data_graph)
         elif choice == '3':
             print("\nGenerating district split heatmap...")
-            visualize_split_heatmap(district_df.copy())  # Pass a copy to avoid modifying original df
         elif choice == '4':
             trace_district_lineage(district_df, data_graph)
         elif choice == '5':

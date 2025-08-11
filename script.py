@@ -1,3 +1,4 @@
+
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -11,7 +12,6 @@ import seaborn as sns
 
 
 def load_and_prepare_data():
-    """Load the district data"""
     district_data = [
         {'lgd_code': 470, 'year': 1998, 'district': 'Bastar', 'area': 14970, 'parent_lgd': None},
         {'lgd_code': 472, 'year': 1998, 'district': 'Bilaspur', 'area': 8270, 'parent_lgd': None},
@@ -52,10 +52,8 @@ def load_and_prepare_data():
 
 
 def create_3d_network_visualization():
-    """3D network visualization of district relationships"""
     df = load_and_prepare_data()
 
-    # Create graph
     G = nx.DiGraph()
     for _, row in df.iterrows():
         G.add_node(row['lgd_code'], **row.to_dict())
@@ -66,22 +64,18 @@ def create_3d_network_visualization():
             for parent in parents:
                 G.add_edge(parent, row['lgd_code'])
 
-    # Create 3D layout
     pos = nx.spring_layout(G, k=3, iterations=50, dim=3)
 
-    # Extract coordinates
     x_nodes = [pos[node][0] for node in G.nodes()]
     y_nodes = [pos[node][1] for node in G.nodes()]
     z_nodes = [pos[node][2] for node in G.nodes()]
 
-    # Create edges
     x_edges, y_edges, z_edges = [], [], []
     for edge in G.edges():
         x_edges.extend([pos[edge[0]][0], pos[edge[1]][0], None])
         y_edges.extend([pos[edge[0]][1], pos[edge[1]][1], None])
         z_edges.extend([pos[edge[0]][2], pos[edge[1]][2], None])
 
-    # Create node colors based on year
     node_colors = []
     node_text = []
     for node in G.nodes():
@@ -97,16 +91,14 @@ def create_3d_network_visualization():
             color = 'blue'
         elif year == 2020:
             color = 'green'
-        else:  # 2022
+        else:
             color = 'purple'
 
         node_colors.append(color)
         node_text.append(f"{district}<br>LGD: {node}<br>Year: {year}<br>Area: {area} km²")
 
-    # Create 3D plot
     fig = go.Figure()
 
-    # Add edges
     fig.add_trace(go.Scatter3d(
         x=x_edges, y=y_edges, z=z_edges,
         mode='lines',
@@ -115,7 +107,6 @@ def create_3d_network_visualization():
         showlegend=False
     ))
 
-    # Add nodes
     fig.add_trace(go.Scatter3d(
         x=x_nodes, y=y_nodes, z=z_nodes,
         mode='markers+text',
@@ -147,10 +138,8 @@ def create_3d_network_visualization():
 
 
 def create_timeline_visualization():
-    """Create timeline visualization of district formation"""
     df = load_and_prepare_data()
 
-    # Count districts by year
     year_counts = df['year'].value_counts().sort_index()
 
     fig = go.Figure()
@@ -175,10 +164,8 @@ def create_timeline_visualization():
 
 
 def create_area_analysis():
-    """Create area analysis visualization"""
     df = load_and_prepare_data()
 
-    # Create subplots
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=('Area Distribution by Year', 'Top 10 Largest Districts',
@@ -187,7 +174,6 @@ def create_area_analysis():
                [{"type": "scatter"}, {"type": "histogram"}]]
     )
 
-    # Box plot of area by year
     for year in df['year'].unique():
         year_data = df[df['year'] == year]
         fig.add_trace(
@@ -195,14 +181,12 @@ def create_area_analysis():
             row=1, col=1
         )
 
-    # Top 10 largest districts
     top_10 = df.nlargest(10, 'area')
     fig.add_trace(
         go.Bar(x=top_10['district'], y=top_10['area'], showlegend=False),
         row=1, col=2
     )
 
-    # Scatter plot
     colors = {'1998': 'red', '2007': 'orange', '2012': 'blue', '2020': 'green', '2022': 'purple'}
     for year in df['year'].unique():
         year_data = df[df['year'] == year]
@@ -214,7 +198,6 @@ def create_area_analysis():
             row=2, col=1
         )
 
-    # Histogram
     fig.add_trace(
         go.Histogram(x=df['area'], nbinsx=15, showlegend=False),
         row=2, col=2
@@ -234,24 +217,18 @@ def create_area_analysis():
 
 
 def perform_clustering():
-    """Perform K-means clustering on district data"""
     df = load_and_prepare_data()
 
-    # Prepare features for clustering
     features = df[['year', 'area']].copy()
 
-    # Standardize features
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
 
-    # Perform K-means clustering
     kmeans = KMeans(n_clusters=3, random_state=42)
     clusters = kmeans.fit_predict(features_scaled)
 
-    # Add cluster labels to dataframe
     df['cluster'] = clusters
 
-    # Create visualization
     fig = px.scatter(df, x='year', y='area', color='cluster',
                      hover_data=['district', 'lgd_code'],
                      title="District Clustering (K-means)",
@@ -263,26 +240,20 @@ def perform_clustering():
 
 
 def main():
-    """Main function to create all visualizations"""
     print("Creating visualizations...")
 
-    # Create 3D network visualization
     fig_3d = create_3d_network_visualization()
     fig_3d.show()
 
-    # Create timeline visualization
     fig_timeline = create_timeline_visualization()
     fig_timeline.show()
 
-    # Create area analysis
     fig_area = create_area_analysis()
     fig_area.show()
 
-    # Perform clustering
     fig_cluster, df_clustered = perform_clustering()
     fig_cluster.show()
 
-    # Print some statistics
     df = load_and_prepare_data()
     print(f"\nDataset Statistics:")
     print(f"Total districts: {len(df)}")
@@ -292,7 +263,6 @@ def main():
     print(f"Largest district: {df.loc[df['area'].idxmax(), 'district']} ({df['area'].max():.2f} km²)")
     print(f"Smallest district: {df.loc[df['area'].idxmin(), 'district']} ({df['area'].min():.2f} km²)")
 
-    # Print districts by year
     print(f"\nDistricts by formation year:")
     for year in sorted(df['year'].unique()):
         count = len(df[df['year'] == year])
